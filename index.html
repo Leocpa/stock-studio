@@ -65,7 +65,7 @@ const MODELS={
  'gpt-4.1-mini':{provider:'OpenAI',input:.4,output:1.6,cached:.10,write:0},
  'gemini-2.5-flash':{provider:'Google',input:.3,output:2.5,cached:.03,write:0}
 };
-const state={bars:[],source:'',asof:'',demo:false,report:'',lastMode:'preview',history:[],lastUsage:null,skill:'',currentModel:'',lastError:'',isBusy:false};
+const state={advView:{tf:'D',n:120},bars:[],source:'',asof:'',demo:false,report:'',lastMode:'preview',history:[],lastUsage:null,skill:'',currentModel:'',lastError:'',isBusy:false};
 const fmt=(v,d=2)=>Number.isFinite(v)?Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
 const usd=n=>'$'+(Number(n)||0).toFixed(6);const plain=n=>Math.round(n||0).toLocaleString('en-US');
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -110,10 +110,11 @@ const p2=n=>String(n).padStart(2,'0');
 const ymd=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
 async function ft(u,name){const ac=new AbortController(),t=setTimeout(()=>ac.abort(),20000);
   try{return await fetch(u,{signal:ac.signal})}catch(e){throw Error(name+' 無法連線（'+(e.name==='AbortError'?'逾時 20 秒':'被瀏覽器、網路或預覽視窗擋下')+'）')}finally{clearTimeout(t)}}
+const HIST_YEARS=5;
 async function fm(ds,id,start,tok){const u=new URL(FM_URL);u.searchParams.set('dataset',ds);u.searchParams.set('data_id',id);u.searchParams.set('start_date',start);if(tok)u.searchParams.set('token',tok);
   const r=await ft(u,'FinMind');if(!r.ok)throw Error('FinMind '+ds+' HTTP '+r.status);const j=await r.json();if(j.status!==200)throw Error('FinMind '+ds+'：'+(j.msg||j.status));return j.data}
 async function twseBars(id){const now=new Date(),out=[];
-  for(let k=13;k>=0;k--){const d=new Date(now.getFullYear(),now.getMonth()-k,1);
+  const M=HIST_YEARS*12;for(let k=M;k>=0;k--){status('證交所月資料 '+(M-k+1)+' / '+(M+1)+'…');const d=new Date(now.getFullYear(),now.getMonth()-k,1);
     const r=await ft('https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date='+d.getFullYear()+p2(d.getMonth()+1)+'01&stockNo='+encodeURIComponent(id),'證交所');
     if(!r.ok)throw Error('證交所 HTTP '+r.status);const j=await r.json();
     if(j.stat==='OK'&&j.data)for(const x of j.data){const c=Number(String(x[6]).replace(/,/g,''));if(!(c>0))continue;const n=t=>Number(String(t).replace(/,/g,''));const [yy,mm,dd]=x[0].split('/');
@@ -136,11 +137,11 @@ async function fetchTWSE(){
   setBusy(true);status('查詢 '+id+' 行情與財報中…');$('reportPre').textContent='查詢 '+id+' 中，請稍候（通常 3–10 秒）…';tab('analysis');
   try{
     let bars=null,src='',useTok=tok;const errs=[];
-    const tryFM=async t=>(await fm('TaiwanStockPrice',id,ymd(new Date(Date.now()-420*864e5)),t)).filter(r=>r.close>0).map(r=>({date:r.date,open:r.open,high:r.max,low:r.min,close:r.close,volume:r.Trading_Volume}));
+    const tryFM=async t=>(await fm('TaiwanStockPrice',id,ymd(new Date(Date.now()-Math.round(HIST_YEARS*365.25+10)*864e5)),t)).filter(r=>r.close>0).map(r=>({date:r.date,open:r.open,high:r.max,low:r.min,close:r.close,volume:r.Trading_Volume}));
     try{bars=await tryFM(tok);src='FinMind TaiwanStockPrice（finmindtrade.com）'}
     catch(e1){errs.push(e1.message);
       if(tok){try{status('Token 可能無效，改用免 Token 查詢…');bars=await tryFM('');useTok='';src='FinMind TaiwanStockPrice（未使用 Token）';$('fmToken').value='';try{localStorage.removeItem('fm_token')}catch(_){}}catch(e2){errs.push(e2.message)}}
-      if(!bars||!bars.length){status('FinMind 取價失敗，改用證交所月資料（上市股，約需 20 秒）…');try{bars=await twseBars(id);src='臺灣證券交易所 STOCK_DAY（未還原）'}catch(e3){errs.push(e3.message);throw Error(errs.join('；'))}}}
+      if(!bars||!bars.length){status('FinMind 取價失敗，改用證交所月資料（上市股，五年約需 1.5 分鐘）…');try{bars=await twseBars(id);src='臺灣證券交易所 STOCK_DAY（未還原）'}catch(e3){errs.push(e3.message);throw Error(errs.join('；'))}}}
     if(!bars||bars.length<30)throw Error('只取得 '+(bars?bars.length:0)+' 筆日 K，請確認代碼與市場');
     bars.sort((a,b)=>a.date.localeCompare(b.date));
     $('csv').value=csvString(bars);useBars(bars,src,false);
@@ -217,18 +218,22 @@ function renderExtras(){
    +kvb('ADX / +DI / −DI',fmt(I.adx.adx[n],1)+' / '+fmt(I.adx.pdi[n],1)+' / '+fmt(I.adx.mdi[n],1))
    +kvb('MACD / 訊號 / 柱',fmt(I.macd.m[n])+' / '+fmt(I.macd.sg[n])+' / '+fmt(I.macd.h[n]))
    +kvb('布林 下 / 中 / 上',fmt(I.bb.lo[n])+' / '+fmt(I.bb.mid[n])+' / '+fmt(I.bb.up[n]))+'</div>';
-  h+='<div class="subhead">K 線、成交量、RSI、MACD（近 120 日）</div><div class="advchart"><canvas id="advCv"></canvas></div><div class="legend"><span class="b">SMA20</span><span class="y">SMA60</span><span class="p">SMA240</span><span>布林（灰）</span></div>';
+  const V=state.advView,btn=(g,v,t,on)=>`<button class="btn ${on?'primary':'outline'}" data-adv="${g}" data-v="${v}" style="padding:6px 12px">${t}</button>`;
+  h+='<div class="subhead" id="advTitle"></div><div class="toolbar" style="margin-bottom:8px">'+btn('tf','D','日線',V.tf==='D')+btn('tf','W','週線',V.tf==='W')+'<span style="width:10px"></span>'+btn('n','120','近 120 根',V.n===120)+btn('n','250','近 250 根',V.n===250)+btn('n','0','全部（約 5 年）',V.n===0)+'</div><div class="advchart"><canvas id="advCv"></canvas></div><div class="legend"><span class="b">SMA20</span><span class="y">SMA60</span><span class="p">SMA240</span><span>布林（灰）</span></div>';
   if(side)h+='<div class="x2">'+chipsHtml(side.inst)+revHtml(side.rev)+'</div><div class="x2">'+qtrHtml(side.fs)+'<div></div></div>';
   else h+='<div class="xnote">法人、月營收與單季財報只在使用「查詢」時取得；CSV／範例資料不含這些欄位。</div>';
   h+='<div class="subhead">近 15 日日線</div><div class="tablewrap"><table><thead><tr><th>日期</th><th class="num">開</th><th class="num">高</th><th class="num">低</th><th class="num">收</th><th class="num">漲跌</th><th class="num">量（張）</th></tr></thead><tbody>'
    +b.slice(-15).reverse().map((r,k)=>{const pv=b[b.length-2-k],d=pv?r.close-pv.close:0;return`<tr><td>${esc(r.date)}</td><td class="num">${fmt(r.open)}</td><td class="num">${fmt(r.high)}</td><td class="num">${fmt(r.low)}</td><td class="num">${fmt(r.close)}</td><td class="num ${xc(d)}">${fmt(d)}</td><td class="num">${fmt(r.volume/1000,0)}</td></tr>`}).join('')
-   +'</tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="btn" id="csvDl">下載完整日線 CSV</button></div>';
-  el.innerHTML=h;state.adv={b,I};drawAdv();
-  $('csvDl').onclick=()=>download('daily_'+($('ticker').value.trim()||'data')+'.csv',csvString(b),'text/csv;charset=utf-8')}
+   +'</tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="btn" id="csvDl">下載完整日線 CSV（'+b.length+' 筆）</button><button class="btn" id="csvDlW">下載週線 CSV（'+weekly(b).length+' 筆）</button></div>';
+  el.innerHTML=h;state.adv={b,I,W:null};drawAdv();
+  for(const x of el.querySelectorAll('[data-adv]'))x.onclick=()=>{const g=x.dataset.adv,v=x.dataset.v;if(g==='tf')state.advView.tf=v;else state.advView.n=+v;renderExtras()};
+  $('csvDl').onclick=()=>download('daily_'+($('ticker').value.trim()||'data')+'.csv',csvString(b),'text/csv;charset=utf-8');
+  $('csvDlW').onclick=()=>download('weekly_'+($('ticker').value.trim()||'data')+'.csv',csvString(weekly(b)),'text/csv;charset=utf-8')}
 function drawAdv(){
-  const A=state.adv,cv=$('advCv');if(!A||!cv)return;const rows=A.b,I=A.I,W=cv.parentElement.clientWidth;if(W<50)return;
+  const A=state.adv,cv=$('advCv');if(!A||!cv)return;const V=state.advView,wk=V.tf==='W';if(wk&&!A.W){const wb=weekly(A.b);A.W={b:wb,I:xInd(wb)}}const rows=wk?A.W.b:A.b,I=wk?A.W.I:A.I,W=cv.parentElement.clientWidth;if(W<50)return;
+  const tt=$('advTitle');if(tt)tt.textContent='K 線、成交量、RSI、MACD（'+(wk?'週線':'日線')+'，'+(V.n&&V.n<rows.length?'近 '+V.n+' 根':'全部 '+rows.length+' 根')+'）';
   const dpr=window.devicePixelRatio||1,H=600;cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);
-  const N=Math.min(120,rows.length),o=rows.length-N,pad={l:56,r:8},cw=(W-pad.l-pad.r)/N,X=i=>pad.l+(i+.5)*cw;
+  const N=V.n?Math.min(V.n,rows.length):rows.length,o=rows.length-N,pad={l:56,r:8},cw=(W-pad.l-pad.r)/N,X=i=>pad.l+(i+.5)*cw;
   const panels=[{y:14,h:290},{y:318,h:70},{y:400,h:80},{y:494,h:80}];const TXT='#8fa6b7',GRID='#264052',UP='#38cda5',DN='#f47b80';
   g.font='11px sans-serif';g.textBaseline='middle';
   const lines=(p,min,max,arr,col,w=1)=>{g.strokeStyle=col;g.lineWidth=w;g.beginPath();let st=false;arr.slice(o).forEach((v,i)=>{if(v==null)return;const y=p.y+p.h-(v-min)/(max-min)*p.h;st?g.lineTo(X(i),y):g.moveTo(X(i),y);st=true});g.stroke()};
@@ -236,14 +241,14 @@ function drawAdv(){
   const tag=(t,p)=>{g.fillStyle=TXT;g.textAlign='right';g.fillText(t,W-pad.r-4,p.y+8)};
   let p=panels[0];const sl=rows.slice(o);let mn=Math.min(...sl.map(r=>r.low),...I.bb.lo.slice(o).filter(v=>v!=null)),mx=Math.max(...sl.map(r=>r.high),...I.bb.up.slice(o).filter(v=>v!=null));const pv=(mx-mn)*.04;mn-=pv;mx+=pv;axis(p,mn,mx);
   const Y=v=>p.y+p.h-(v-mn)/(mx-mn)*p.h;
-  sl.forEach((r,i)=>{const col=r.close>=r.open?UP:DN;g.strokeStyle=g.fillStyle=col;g.lineWidth=1;g.beginPath();g.moveTo(X(i),Y(r.high));g.lineTo(X(i),Y(r.low));g.stroke();const t=Y(Math.max(r.open,r.close)),bb=Y(Math.min(r.open,r.close));g.fillRect(X(i)-cw*.35,t,cw*.7,Math.max(1,bb-t))});
+  sl.forEach((r,i)=>{const col=r.close>=r.open?UP:DN;g.strokeStyle=g.fillStyle=col;g.lineWidth=1;g.beginPath();g.moveTo(X(i),Y(r.high));g.lineTo(X(i),Y(r.low));g.stroke();const t=Y(Math.max(r.open,r.close)),bb=Y(Math.min(r.open,r.close));g.fillRect(X(i)-Math.max(cw*.35,.5),t,Math.max(cw*.7,1),Math.max(1,bb-t))});
   lines(p,mn,mx,I.s20,'#73b2ff',1.5);lines(p,mn,mx,I.s60,'#f6c77c',1.5);lines(p,mn,mx,I.s240,'#b7a1fb',1.5);lines(p,mn,mx,I.bb.up,'#6b8294');lines(p,mn,mx,I.bb.lo,'#6b8294');
   p=panels[1];const vm=Math.max(...sl.map(r=>r.volume/1000));axis(p,0,vm,0);sl.forEach((r,i)=>{g.fillStyle=r.close>=r.open?'#38cda580':'#f47b8080';const hh=r.volume/1000/vm*p.h;g.fillRect(X(i)-cw*.35,p.y+p.h-hh,cw*.7,hh)});tag('成交量（張）',p);
   p=panels[2];axis(p,0,100,0);[30,70].forEach(v=>{const y=p.y+p.h-v/100*p.h;g.strokeStyle='#ff817f80';g.setLineDash([3,3]);g.beginPath();g.moveTo(pad.l,y);g.lineTo(W-pad.r,y);g.stroke();g.setLineDash([])});lines(p,0,100,I.rsi,'#8abfff',1.4);tag('RSI14（虛線 30/70）',p);
   p=panels[3];const mh=I.macd.h.slice(o),mm=I.macd.m.slice(o),ms=I.macd.sg.slice(o);const ext=Math.max(...mh.map(Math.abs),...mm.map(Math.abs),...ms.map(Math.abs))||1;axis(p,-ext,ext,1);
   mh.forEach((v,i)=>{g.fillStyle=v>=0?'#38cda580':'#f47b8080';const y0=p.y+p.h/2,hh=v/ext*p.h/2;g.fillRect(X(i)-cw*.35,hh>=0?y0-hh:y0,cw*.7,Math.abs(hh))});
   lines(p,-ext,ext,I.macd.m,'#8abfff');lines(p,-ext,ext,I.macd.sg,'#f6c77c');tag('MACD（藍）/ 訊號（黃）/ 柱',p);
-  g.fillStyle=TXT;[0,Math.floor(N/2),N-1].forEach(i=>{g.textAlign=i===0?'left':i===N-1?'right':'center';g.fillText(sl[i].date.slice(5),i===0?pad.l:i===N-1?W-pad.r:X(i),H-6)})}
+  g.fillStyle=TXT;[0,Math.floor(N/2),N-1].forEach(i=>{g.textAlign=i===0?'left':i===N-1?'right':'center';g.fillText(N>130?sl[i].date.slice(0,7):sl[i].date.slice(5),i===0?pad.l:i===N-1?W-pad.r:X(i),H-6)})}
 window.addEventListener('resize',()=>drawAdv());
 
 $('fetchBtn').addEventListener('click',fetchTWSE);$('goBtn').addEventListener('click',fetchTWSE);$('testBtn').addEventListener('click',testConn);$('demoBtn').addEventListener('click',demo);$('csvBtn').addEventListener('click',()=>$('csvFile').click());$('csvFile').addEventListener('change',async e=>{if(!e.target.files.length)return;let txt=await e.target.files[0].text();$('csv').value=txt;try{let b=parseCSV(txt);useBars(b,'使用者自行匯入 OHLCV CSV',false)}catch(err){status('⚠ '+err.message)}});$('applyCsv').addEventListener('click',()=>{try{useBars(parseCSV($('csv').value),'使用者手動貼上 OHLCV CSV',false)}catch(e){status('⚠ '+e.message)}});
