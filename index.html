@@ -308,8 +308,10 @@ window.addEventListener('resize',()=>drawAdv());
 
 
 // ===== 盤中即時報價（經由本機 realtime_proxy.py 取得證交所／期交所 MIS 報價）=====
-const RT_BASE='http://127.0.0.1:8765',RT_DL='https://raw.githubusercontent.com/Leocpa/stock-studio/main/realtime_proxy.py';
+const RT_LOCAL='http://127.0.0.1:8765',RT_DL='https://raw.githubusercontent.com/Leocpa/stock-studio/main/realtime_proxy.py';
 let rtTimer=null,rtLast='';
+const rtBase=()=>{try{return(localStorage.getItem('rt_base')||RT_LOCAL).replace(/\/+$/,'')}catch(e){return RT_LOCAL}};
+try{const q=new URLSearchParams(location.search).get('rt');if(q){/^https?:\/\//.test(q)?localStorage.setItem('rt_base',q):localStorage.removeItem('rt_base')}}catch(e){}
 const rtN=(x,d=2)=>x==null||!Number.isFinite(x)?'—':fmt(x,d);
 function rtTaipeiNow(){return new Date().toLocaleString('sv-SE',{timeZone:'Asia/Taipei'})}
 function rtAge(date,time){if(!date||!time)return null;const t=String(time).replace(/[^0-9]/g,'').padStart(6,'0'),d=String(date).replace(/[^0-9]/g,'');if(d.length!==8)return null;const q=Date.parse(`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}T${t.slice(0,2)}:${t.slice(2,4)}:${t.slice(4,6)}Z`),n=Date.parse(rtTaipeiNow().replace(' ','T')+'Z');return Number.isFinite(q)?Math.round((n-q)/1000):null}
@@ -326,8 +328,8 @@ function rtFutHtml(j){
   const n=j.near,sp=j.spot,basis=sp&&sp.price!=null&&n.price!=null?n.price-sp.price:null;
   return rtBox((n.name||'')+'（'+n.symbol+'，近月）',n,{prevLabel:'前日結算價',cells:kvb('成交量（口）',rtN(n.volume,0))+kvb('未平倉（口）',rtN(n.openInterest,0))+kvb('買 / 賣',rtN(n.bid)+' / '+rtN(n.ask))+(sp?kvb('加權指數現貨',rtN(sp.price),basis==null?'':'期現價差 '+(basis>0?'+':'')+rtN(basis)):'')},'期貨即時報價含日盤與夜盤；與下方日線（只含日盤）時段不同。')}
 function rtOffHtml(why,network){
-  return`<div class="eyebrow">盤中即時報價</div><div style="margin:6px 0;color:var(--muted);font-size:14px;line-height:1.7">${esc(why)}</div>`+(network?`<div class="xnote">證交所、期交所的即時報價不允許網頁直接讀取，需要在這台電腦啟動一支小程式：點兩下 <b>D:\\抓資料程式\\run_realtime.bat</b>（或執行 <code>python realtime_proxy.py</code>），啟動後這裡會在幾秒內自動出現報價。沒有這支程式的人可以<a href="${RT_DL}" target="_blank" rel="noopener" style="color:var(--aqua)">下載 realtime_proxy.py</a>（只用 Python 內建模組）。若瀏覽器詢問是否允許存取本機網路，請按「允許」。</div>`:'')}
-async function rtGet(path){const ac=new AbortController(),t=setTimeout(()=>ac.abort(),6000);try{const r=await fetch(RT_BASE+path,{signal:ac.signal,cache:'no-store'});return await r.json()}finally{clearTimeout(t)}}
+  return`<div class="eyebrow">盤中即時報價</div><div style="margin:6px 0;color:var(--muted);font-size:14px;line-height:1.7">${esc(why)}</div>`+(network?`<div class="xnote">證交所、期交所的即時報價不允許網頁直接讀取，需要在這台電腦啟動一支小程式：點兩下 <b>D:\\抓資料程式\\run_realtime.bat</b>（或執行 <code>python realtime_proxy.py</code>），啟動後這裡會在幾秒內自動出現報價。沒有這支程式的人可以<a href="${RT_DL}" target="_blank" rel="noopener" style="color:var(--aqua)">下載 realtime_proxy.py</a>（只用 Python 內建模組）。若瀏覽器詢問是否允許存取本機網路，請按「允許」。</div><div class="xnote">已架好雲端即時報價服務（Cloudflare Worker）？貼上網址：<input id="rtUrl" placeholder="https://xxxx.workers.dev" style="width:260px;padding:5px 8px"> <button class="btn" id="rtSave" style="padding:5px 12px">儲存並連線</button> <button class="btn" id="rtReset" style="padding:5px 12px">改回本機</button>'+(rtBase()!==RT_LOCAL?'（目前使用：'+esc(rtBase())+'）':'')+'</div>`:'')}
+async function rtGet(path){const ac=new AbortController(),t=setTimeout(()=>ac.abort(),6000);try{const r=await fetch(rtBase()+path,{signal:ac.signal,cache:'no-store'});return await r.json()}finally{clearTimeout(t)}}
 async function rtTick(){
   const box=$('liveBox'),id=$('ticker').value.trim(),mk=$('market').value;
   if(!id||mk==='OTHER'||state.demo){box.style.display='none';return 5000}
@@ -335,8 +337,9 @@ async function rtTick(){
   try{
     if(fut){const j=await rtGet('/futures?id='+encodeURIComponent(id.toUpperCase()));if(key!==rtLast&&!box.dataset.ok)box.innerHTML='';if(!j.ok)throw Error(j.error||'期貨報價失敗');if(('F:'+$('ticker').value.trim())!==key)return 1000;box.innerHTML=rtFutHtml(j)}
     else{const j=await rtGet('/stock?ids='+encodeURIComponent(id));if(!j.ok)throw Error(j.error||'股票報價失敗');const q=(j.data||[]).find(x=>x.id===id)||(j.data||[])[0];if(!q)throw Error('查無 '+id+' 的即時報價（代碼錯誤、興櫃，或證交所暫無資料）');if(('S:'+$('ticker').value.trim())!==key)return 1000;box.innerHTML=rtStockHtml(q)}
-    box.dataset.ok='1';rtLast=key;return 5000
-  }catch(e){delete box.dataset.ok;const net=e.name==='AbortError'||e instanceof TypeError;box.innerHTML=rtOffHtml(net?'即時報價服務尚未啟動，或瀏覽器不允許連到本機。':'即時報價失敗：'+e.message,net);return net?15000:8000}}
+    box.dataset.ok='1';delete box.dataset.err;rtLast=key;return 5000
+  }catch(e){delete box.dataset.ok;const net=e.name==='AbortError'||e instanceof TypeError,h=rtOffHtml(net?'即時報價服務尚未啟動，或瀏覽器不允許連到本機。':'即時報價失敗：'+e.message,net);if(box.dataset.err!==h){box.innerHTML=h;box.dataset.err=h}return net?15000:8000}}
+$('liveBox').addEventListener('click',e=>{const t=e.target;if(t.id==='rtSave'){const v=($('rtUrl').value||'').trim();if(/^https?:\/\//.test(v)){try{localStorage.setItem('rt_base',v.replace(/\/+$/,''))}catch(_){}delete $('liveBox').dataset.err;rtLoop(0)}else alert('請貼上以 https:// 開頭的網址')}else if(t.id==='rtReset'){try{localStorage.removeItem('rt_base')}catch(_){}delete $('liveBox').dataset.err;rtLoop(0)}});
 function rtLoop(delay=0){clearTimeout(rtTimer);rtTimer=setTimeout(async()=>{let next=5000;try{if(!document.hidden)next=await rtTick()}catch(e){next=15000}rtLoop(next)},delay)}
 
 $('market').addEventListener('change',()=>{syncFut();rtLoop(0)});$('ticker').addEventListener('input',()=>{syncFut();rtLoop(700)});$('fetchBtn').addEventListener('click',fetchTWSE);$('goBtn').addEventListener('click',fetchTWSE);$('testBtn').addEventListener('click',testConn);$('demoBtn').addEventListener('click',demo);$('csvBtn').addEventListener('click',()=>$('csvFile').click());$('csvFile').addEventListener('change',async e=>{if(!e.target.files.length)return;let txt=await e.target.files[0].text();$('csv').value=txt;try{let b=parseCSV(txt);useBars(b,'使用者自行匯入 OHLCV CSV',false)}catch(err){status('⚠ '+err.message)}});$('applyCsv').addEventListener('click',()=>{try{useBars(parseCSV($('csv').value),'使用者手動貼上 OHLCV CSV',false)}catch(e){status('⚠ '+e.message)}});
