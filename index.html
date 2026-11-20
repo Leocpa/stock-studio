@@ -125,9 +125,9 @@ async function twseBars(id){const now=new Date(),out=[];
 function annualFin(fs,bs){const q={},b={};fs.forEach(r=>{(q[r.date]=q[r.date]||{})[r.type]=r.value});bs.forEach(r=>{(b[r.date]=b[r.date]||{})[r.type]=r.value});
   const ys=[...new Set(Object.keys(q).map(d=>+d.slice(0,4)))].sort(),out=[];const r1=(x,d=1)=>Number.isFinite(x)?+x.toFixed(d):null;
   for(const y of ys){const ds=['03-31','06-30','09-30','12-31'].map(z=>y+'-'+z);if(ds.some(d=>!q[d]||q[d].Revenue==null))continue;
-    const S=t=>ds.reduce((a,d)=>a+(q[d][t]==null?NaN:q[d][t]),0);const rev=S('Revenue'),gp=S('GrossProfit'),ni=S('IncomeAfterTaxes'),eps=S('EPS');
+    const S=t=>ds.reduce((a,d)=>a+(q[d][t]==null?NaN:q[d][t]),0);const rev=S('Revenue'),gp=S('GrossProfit'),oi=S('OperatingIncome'),ni=S('IncomeAfterTaxes'),eps=S('EPS');
     const e1=(b[y+'-12-31']||{}).EquityAttributableToOwnersOfParent,e0=(b[(y-1)+'-12-31']||{}).EquityAttributableToOwnersOfParent,L=(b[y+'-12-31']||{}).Liabilities,A=(b[y+'-12-31']||{}).TotalAssets;
-    out.push({year:y,revenue:r1(rev/1e8,1),grossMargin:r1(gp/rev*100),roe:(e1&&e0)?r1(ni/((e1+e0)/2)*100):null,debtRatio:(L&&A)?r1(L/A*100):null,eps:r1(eps,2)})}
+    out.push({year:y,revenue:r1(rev/1e8,1),grossMargin:r1(gp/rev*100),opMargin:r1(oi/rev*100),netMargin:r1(ni/rev*100),roe:(e1&&e0)?r1(ni/((e1+e0)/2)*100):null,debtRatio:(L&&A)?r1(L/A*100):null,eps:r1(eps,2)})}
   return out.slice(-3)}
 async function fetchTWSE(){
   const id=$('ticker').value.trim();
@@ -149,7 +149,7 @@ async function fetchTWSE(){
     const y=new Date().getFullYear();
     const [info,per,fs,bs,inst,mrev]=(await Promise.allSettled([fm('TaiwanStockInfo',id,'2020-01-01',useTok),fm('TaiwanStockPER',id,ymd(new Date(Date.now()-14*864e5)),useTok),fm('TaiwanStockFinancialStatements',id,(y-4)+'-12-01',useTok),fm('TaiwanStockBalanceSheet',id,(y-4)+'-12-01',useTok),fm('TaiwanStockInstitutionalInvestorsBuySell',id,ymd(new Date(Date.now()-30*864e5)),useTok),fm('TaiwanStockMonthRevenue',id,ymd(new Date(Date.now()-800*864e5)),useTok)])).map(r=>r.status==='fulfilled'?r.value:null);
     const nm=info&&info.length?info[info.length-1]:null;$('company').value=nm?nm.stock_name:'';
-    state.side={id,per,inst,rev:mrev,fs};const years=fs&&bs?annualFin(fs,bs):[];let msg='✓ '+bars.length+' 筆日 K（最近 '+state.asof+'）';
+    state.side={id,per,inst,rev:mrev,fs};const years=fs&&bs?annualFin(fs,bs):[];state.side.years=years;let msg='✓ '+bars.length+' 筆日 K（最近 '+state.asof+'）';
     if(years.length){const pe=per&&per.length?per[per.length-1].PER:null;
       $('fin').value=JSON.stringify({industry:nm?nm.industry_category:'',unit:'億元',years,pe:pe>0?pe:null,peerPE:null,source:'FinMind：TaiwanStockFinancialStatements／BalanceSheet／PER。年度由四季合計；ROE＝稅後淨利÷期初期末平均母公司權益（近似值）；營收單位億元',asof:state.asof},null,1);msg+='；已自動帶入近 '+years.length+' 個完整年度財報'}
     else{$('fin').value='';msg+='；⚠ 無法取得完整年度財報（可能為 ETF／金融股或免費額度用盡），請手動貼上財報 JSON'}
@@ -198,6 +198,13 @@ function revHtml(rev){
     const pm=r.revenue_month===1?m[(r.revenue_year-1)+'-12']:m[r.revenue_year+'-'+(r.revenue_month-1)],py=m[(r.revenue_year-1)+'-'+r.revenue_month];
     const mo=pm?(r.revenue/pm-1)*100:null,yo=py?(r.revenue/py-1)*100:null;
     return`<tr><td>${r.revenue_year}/${p2(r.revenue_month)}</td><td class="num">${fmt(r.revenue/1e8)}</td><td class="num ${xc(mo)}">${mo==null?'—':fmt(mo)+'%'}</td><td class="num ${xc(yo)}">${yo==null?'—':fmt(yo)+'%'}</td></tr>`}).join('')}</tbody></table></div></div>`}
+function annHtml(years){
+  if(!years||!years.length)return'<div class="subhead">近三年年度財報</div><div class="xnote">無法取得完整年度財報（可能為 ETF／金融股、新上市不足三年，或免費額度用盡）。下方仍保留單季財報。</div>';
+  const p=(x,d=1)=>x!=null&&Number.isFinite(x)?fmt(x,d)+'%':'—',ys=years.slice().sort((a,b)=>b.year-a.year);
+  const yoy=y=>{const pv=years.find(z=>z.year===y.year-1);return pv&&pv.revenue&&y.revenue!=null?(y.revenue/pv.revenue-1)*100:null};
+  return'<div class="subhead">近三年年度財報（億元）</div><div class="tablewrap"><table><thead><tr><th>年度</th><th class="num">營收</th><th class="num">營收年增</th><th class="num">毛利率</th><th class="num">營業利益率</th><th class="num">淨利率</th><th class="num">ROE（近似）</th><th class="num">負債比</th><th class="num">EPS（元）</th></tr></thead><tbody>'
+   +ys.map(y=>{const g=yoy(y);return`<tr><td>${y.year}</td><td class="num">${y.revenue!=null?fmt(y.revenue,1):'—'}</td><td class="num ${g==null?'':xc(g)}">${p(g)}</td><td class="num">${p(y.grossMargin)}</td><td class="num">${p(y.opMargin)}</td><td class="num">${p(y.netMargin)}</td><td class="num">${p(y.roe)}</td><td class="num">${p(y.debtRatio)}</td><td class="num">${y.eps!=null?fmt(y.eps,2):'—'}</td></tr>`}).join('')
+   +'</tbody></table></div><div class="xnote">年度數字由 FinMind 四季單季合計（僅列已公布完整四季的年度）；ROE＝稅後淨利÷期初期末平均母公司權益，為近似值；營收年增僅在有前一年資料時顯示。</div>'}
 function qtrHtml(fs){
   if(!fs||!fs.length)return'<div><div class="subhead">單季財報</div><div class="xnote">資料不足</div></div>';
   const q={};fs.forEach(r=>{(q[r.date]=q[r.date]||{})[r.type]=r.value});const ds=Object.keys(q).sort().slice(-6).reverse();const pc=(a,b)=>a!=null&&b?fmt(a/b*100)+'%':'—';
@@ -220,7 +227,7 @@ function renderExtras(){
    +kvb('布林 下 / 中 / 上',fmt(I.bb.lo[n])+' / '+fmt(I.bb.mid[n])+' / '+fmt(I.bb.up[n]))+'</div>';
   const V=state.advView,btn=(g,v,t,on)=>`<button class="btn ${on?'primary':'outline'}" data-adv="${g}" data-v="${v}" style="padding:6px 12px">${t}</button>`;
   h+='<div class="subhead" id="advTitle"></div><div class="toolbar" style="margin-bottom:8px">'+btn('tf','D','日線',V.tf==='D')+btn('tf','W','週線',V.tf==='W')+'<span style="width:10px"></span>'+btn('n','120','近 120 根',V.n===120)+btn('n','250','近 250 根',V.n===250)+btn('n','0','全部（約 5 年）',V.n===0)+'</div><div class="advchart"><canvas id="advCv"></canvas></div><div class="legend"><span class="b">SMA20</span><span class="y">SMA60</span><span class="p">SMA240</span><span>布林（灰）</span></div>';
-  if(side)h+='<div class="x2">'+chipsHtml(side.inst)+revHtml(side.rev)+'</div><div class="x2">'+qtrHtml(side.fs)+'<div></div></div>';
+  if(side)h+='<div class="x2">'+chipsHtml(side.inst)+revHtml(side.rev)+'</div>'+annHtml(side.years)+'<div class="x2">'+qtrHtml(side.fs)+'<div></div></div>';
   else h+='<div class="xnote">法人、月營收與單季財報只在使用「查詢」時取得；CSV／範例資料不含這些欄位。</div>';
   h+='<div class="subhead">近 15 日日線</div><div class="tablewrap"><table><thead><tr><th>日期</th><th class="num">開</th><th class="num">高</th><th class="num">低</th><th class="num">收</th><th class="num">漲跌</th><th class="num">量（張）</th></tr></thead><tbody>'
    +b.slice(-15).reverse().map((r,k)=>{const pv=b[b.length-2-k],d=pv?r.close-pv.close:0;return`<tr><td>${esc(r.date)}</td><td class="num">${fmt(r.open)}</td><td class="num">${fmt(r.high)}</td><td class="num">${fmt(r.low)}</td><td class="num">${fmt(r.close)}</td><td class="num ${xc(d)}">${fmt(d)}</td><td class="num">${fmt(r.volume/1000,0)}</td></tr>`}).join('')
